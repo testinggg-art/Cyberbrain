@@ -1,16 +1,12 @@
 """Utility functions."""
 
-import inspect
 import os
 import sysconfig
-
-from functools import lru_cache
 from pprint import pformat
 
 from pygments import highlight
-from pygments.lexers import PythonLexer
 from pygments.formatters import Terminal256Formatter
-
+from pygments.lexers import PythonLexer
 
 _INSTALLATION_PATHS = list(sysconfig.get_paths().values())
 
@@ -43,6 +39,7 @@ def should_exclude(frame):
             "importlib._bootstrap_external",
             "zipimport",
             "<string>",  # Dynamically generated frames
+            "<attrs generated init _pytest",  # pytest generated
         )
     ):
         return True

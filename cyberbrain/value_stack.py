@@ -4,8 +4,10 @@ import inspect
 import sys
 from typing import Optional
 
+from crayons import red
+
 from .basis import Mutation, Deletion
-from .block_stack import BlockStack
+from .block_stack import BlockStack, BlockType
 
 
 class ValueStackException(Exception):
@@ -130,14 +132,27 @@ class GeneralValueStack:
         for _ in range(n):
             self._push(tos)
 
-    def _push_block_stack(self):
-        self.block_stack.push(b_level=len(self.stack))
+    def _try_pop_block(self, instr):
+        """Try pops a block and cleans up value stack if we can.
 
-    def _pop_block(self):
-        """Pops a block and cleans up value stack."""
+        This is an attempt to keep value stack in the correct state *without* inspecting
+        the internal state of Python interpreter. We will try pop a block if
+        - Block stack is not empty
+        - Top of block stack matches the type of current instruction.
+        - Offset of current instruction is within [start,end] of the block to be popped.
+
+        If we can't pop a block, that's totally fine.
+        """
+        if self.block_stack.is_empty():
+            print(red(f"{instr} tried to pop a block but stack is empty."))
+            return
+
+        if not self.block_stack.tos.block_matched(instr):
+            return
+
+        # block unwinding
         b_level = self.block_stack.pop().b_level
         print(f"Clean up value block: {self.stack[b_level:]}")
-        # block unwinding
         del self.stack[b_level:]
 
     def _POP_TOP_handler(self):
@@ -322,8 +337,13 @@ class GeneralValueStack:
         else:
             self._push(instr.argrepr)
 
-    def _SETUP_FINALLY_handler(self):
-        self._push_block_stack()
+    def _SETUP_FINALLY_handler(self, instr):
+        self.block_stack.push(
+            b_level=len(self.stack),
+            b_type=BlockType.SETUP_FINALLY,
+            start=instr.offset,
+            end=instr.offset + instr.arg,
+        )
 
     def _LOAD_FAST_handler(self, instr):
         self._push(instr.argrepr)
@@ -341,6 +361,7 @@ class GeneralValueStack:
     def _RAISE_VARARGS_handler(self, instr):
         self._pop(instr.arg)
 
+        # (After using try_pop_block, maybe we don't need this at all.)
         # We need to push 6 elements: (tb, value, exctype, tb, value, exctype)
         # to the value stack. See
         # https://github.com/nedbat/byterun/blob/master/byterun/pyvm2.py#L285-L293
@@ -377,25 +398,23 @@ class GeneralValueStack:
         self._push(elements)
 
     # Jump, block related instructions.
-    def _POP_BLOCK_handler(self):
-        self._pop_block()
+    def _POP_BLOCK_handler(self, instr):
+        self._try_pop_block(instr)
 
-    def _POP_EXCEPT_handler(self):
-        self._pop_block()
+    def _POP_EXCEPT_handler(self, instr):
+        self._try_pop_block(instr)
 
     def _BEGIN_FINALLY_handler(self):
+        # Pushes one element so that END_FINALLY can pop something.
         self._push(NULL)
 
-    def _END_FINALLY_handler(self):
-        if self.tos is NULL:
-            self._pop()
-        elif isinstance(self.tos, int):
-            self._pop_block()
-        elif inspect.isclass(self.tos) and issubclass(self.tos, Exception):
-            self._pop(6)
-            self._pop_block()
-        else:
-            raise ValueStackException(f"TOS has wrong value: {self.tos}")
+    def _END_FINALLY_handler(self, instr):
+        # TODO: test "silenced" case.
+        # At least one value should be popped from value stack, otherwise when
+        # there's no block to pop, value stack has an extra item on it. See
+        # https://github.com/nedbat/byterun/blob/master/byterun/pyvm2.py#L741-L762
+        self._pop()
+        self._try_pop_block(instr)
 
     def _JUMP_FORWARD_handler(self, instr, jumped):
         pass
@@ -427,30 +446,35 @@ class GeneralValueStack:
 class Py37ValueStack(GeneralValueStack):
     """Value stack for Python 3.7."""
 
-    def _SETUP_LOOP_handler(self):
-        self._push_block_stack()
+    def _SETUP_LOOP_handler(self, instr):
+        self.block_stack.push(
+            b_level=len(self.stack),
+            b_type=BlockType.SETUP_LOOP,
+            start=instr.offset,
+            end=instr.offset + instr.arg,
+        )
 
-    def _BREAK_LOOP_handler(self):
-        self._pop_block()
+    def _BREAK_LOOP_handler(self, instr):
+        self._try_pop_block(instr)
 
     def _CONTINUE_LOOP_handler(self, instr):
         pass
 
-    def _SETUP_EXCEPT_handler(self):
-        self._push_block_stack()
+    def _SETUP_EXCEPT_handler(self, instr):
+        self.block_stack.push(
+            b_level=len(self.stack),
+            b_type=BlockType.SETUP_EXCEPT,
+            start=instr.offset,
+            end=instr.offset + instr.arg,
+        )
 
 
 class Py38ValueStack(GeneralValueStack):
     """Value stack for Python 3.8."""
 
-    # >= 3.8
-    # def _POP_FINALLY_handler(self, instr, jumped):
-    #     # TODO: Implement full behaviors
-    #     preserve_tos = instr.arg
-    #     tos = self.tos
-    #     self._pop_block()
-    #     if preserve_tos != 0:
-    #         self._push(tos)
+    def _POP_FINALLY_handler(self, instr):
+        self._pop()  # Similar to END_FINALLY, we need to pop at least one element.
+        self._try_pop_block(instr)
 
 
 def create_value_stack():

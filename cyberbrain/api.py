@@ -53,7 +53,7 @@ class Tracer:
             if utils.should_exclude(frame):
                 return
             frame.f_trace_opcodes = True
-            # print(frame, event, arg)
+            print(frame, event, arg)
             return self.local_tracer
 
         return _global_tracer

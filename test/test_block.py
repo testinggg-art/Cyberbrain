@@ -1,9 +1,6 @@
 """Test instructions that create blocks."""
 
-import pytest
 
-
-@pytest.mark.skip(reason="Not implemented yet.")
 def test_loop(tracer):
     tracer.init()
 
@@ -34,7 +31,6 @@ def test_loop(tracer):
     ]
 
 
-@pytest.mark.skip(reason="Not implemented yet.")
 def test_basic_try_except(tracer):
     tracer.init()
 
@@ -49,7 +45,6 @@ def test_basic_try_except(tracer):
     assert tracer.logger.changes == []
 
 
-@pytest.mark.skip(reason="Not implemented yet.")
 def test_try_except_finally(tracer):
     tracer.init()
 
@@ -65,13 +60,12 @@ def test_try_except_finally(tracer):
     assert tracer.logger.changes == [{"target": "b", "value": 1, "sources": set()}]
 
 
-@pytest.mark.skip(reason="Not implemented yet.")
 def test_statements_in_finally(tracer):
     tracer.init()
 
     for x in range(2):
         try:
-            pass
+            pass  # POP_BLOCK --> Pops the try..final block.
         finally:
             break  # BREAK_LOOP (3.7) POP_FINALLY (3.8)
 
